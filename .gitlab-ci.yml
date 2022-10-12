@@ -1,0 +1,54 @@
+image: mcr.microsoft.com/dotnet/sdk:6.0
+
+stages:
+    - build
+    - test
+    - deploy2
+    
+variables:
+    publishdir: "bin/release/"
+
+build:
+    stage: build
+    script:
+        - "dotnet build"
+    artifacts:
+        paths:
+            - "bin/"
+        expire_in: 1 week
+        
+test:
+    stage: test
+    script: 
+        - "dotnet test"
+        - echo "testing"
+        
+deploy_2: 
+    stage: deploy2
+    variables:
+        deploy_path: "TOKENAPI/"
+    only:
+        - master
+    artifacts:
+        paths:
+            - TOKENAPI/bin/release
+        expire_in: 1 week
+    script:
+    # cd to where csproj is
+    - cd $deploy_path
+    # publish the files - this will generate the publish files in bin/release 
+    - dotnet publish -c release
+    # install zip and lftp
+    - apt-get update -qq && apt-get install -y -qq zip lftp 
+    # cd to bin
+    - cd bin
+    # zip release, name zip publish.zip
+    - mkdir prep
+    - zip -r publish release
+    # upload file to ftp
+    - lftp -e "set ssl:verify-certificate no; lpwd; open $FTP_HOST; user $FTP_USERNAME $FTP_PASSWORD; put -O /var/www/netiq/ publish.zip; bye"
+    # Set the right chmod on SSH key file
+    - chmod 400 $MASTER_SSH_KEY
+    # Unzip file by going to host
+    - ssh -o StrictHostKeyChecking=no -i $MASTER_SSH_KEY $SSH_HOST "cd /var/www/netiq; unzip publish.zip; rm -rf api/*; mv release/* api/; rmdir release; rm -f publish.zip; sudo systemctl restart netiq.service;"
+    ##- ssh -o StrictHostKeyChecking=no -i $MASTER_SSH_KEY2 $SSH_HOST2 "cd /var/www/ordex; unzip publish.zip; rm -rf api/*; mv release/* api/; rmdir release; rm -f publish.zip; cp appsettings.json api/appsettings.json; sudo systemctl restart ordex.service;"
